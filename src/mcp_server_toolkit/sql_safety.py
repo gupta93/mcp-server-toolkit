@@ -37,9 +37,8 @@ def validate_readonly_select(sql: str) -> str:
     return query
 
 
-def ensure_row_limit(sql: str, *, max_rows: int) -> str:
-    """Append LIMIT when the query does not already constrain row count."""
+def wrap_query_with_row_limit(sql: str, *, max_rows: int) -> str:
+    """Wrap the validated query so row limits cannot be bypassed via comments or subqueries."""
 
-    if re.search(r"\bLIMIT\b", sql, re.IGNORECASE):
-        return sql
-    return f"{sql} LIMIT {max_rows}"
+    inner = validate_readonly_select(sql)
+    return f"SELECT * FROM ({inner}) AS _mcp_toolkit_limited LIMIT {max_rows}"
