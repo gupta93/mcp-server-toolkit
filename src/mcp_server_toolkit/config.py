@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -23,8 +24,15 @@ class Settings(BaseSettings):
     github_token: str | None = Field(default=None, description="Optional GitHub API token")
     github_api_base: str = "https://api.github.com"
 
-    database_url: str = "sqlite:///demo_data/demo.db"
+    data_dir: Path = Field(
+        default_factory=lambda: Path.home() / ".local" / "share" / "mcp-server-toolkit"
+    )
+    database_url: str = "sqlite:///demo.db"
     max_sql_rows: int = Field(default=100, ge=1, le=1000)
+    postgres_statement_timeout_ms: int = Field(default=5000, ge=100, le=120_000)
+
+    openapi_allowed_hosts: list[str] = Field(default_factory=list)
+    openapi_max_response_bytes: int = Field(default=262_144, ge=1024, le=10_000_000)
 
     http_host: str = "127.0.0.1"
     http_port: int = Field(default=8000, ge=1, le=65535)
@@ -39,6 +47,22 @@ class Settings(BaseSettings):
     def normalize_http_path(cls, value: str) -> str:
         if not value.startswith("/"):
             return f"/{value}"
+        return value
+
+    @field_validator("data_dir", mode="before")
+    @classmethod
+    def expand_data_dir(cls, value: object) -> object:
+        if isinstance(value, str):
+            return Path(value)
+        return value
+
+    @field_validator("openapi_allowed_hosts", mode="before")
+    @classmethod
+    def parse_openapi_allowed_hosts(cls, value: object) -> object:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
         return value
 
 

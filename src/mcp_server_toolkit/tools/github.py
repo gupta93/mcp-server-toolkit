@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import structlog
@@ -8,8 +9,18 @@ from mcp_server_toolkit.context import AppContext
 
 logger = structlog.get_logger(__name__)
 
+_GITHUB_SLUG = re.compile(r"^[A-Za-z0-9._-]+$")
 
-def _github_headers(app: AppContext) -> dict[str, str]:
+
+def _validate_github_slug(value: str, label: str) -> str:
+    cleaned = value.strip()
+    if not cleaned or not _GITHUB_SLUG.fullmatch(cleaned):
+        raise ValueError(f"Invalid GitHub {label}; must match [A-Za-z0-9._-]")
+    return cleaned
+
+
+async def _get_json(app: AppContext, path: str) -> Any:
+    url = f"{app.settings.github_api_base.rstrip('/')}/{path.lstrip('/')}"
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
@@ -17,12 +28,7 @@ def _github_headers(app: AppContext) -> dict[str, str]:
     }
     if app.settings.github_token:
         headers["Authorization"] = f"Bearer {app.settings.github_token}"
-    return headers
-
-
-async def _get_json(app: AppContext, path: str) -> Any:
-    url = f"{app.settings.github_api_base.rstrip('/')}/{path.lstrip('/')}"
-    response = await app.http.get(url, headers=_github_headers(app))
+    response = await app.http.get(url, headers=headers)
     if response.status_code == 404:
         raise ValueError(f"GitHub resource not found: {path}")
     response.raise_for_status()
@@ -32,13 +38,12 @@ async def _get_json(app: AppContext, path: str) -> Any:
 async def summarize_github_repository(owner: str, repo: str, *, app: AppContext) -> str:
     """Fetch repository metadata and a snapshot of open issues."""
 
-    owner = owner.strip()
-    repo = repo.strip()
-    if not owner or not repo:
-        raise ValueError("Both owner and repo are required")
+    owner = _validate_github_slug(owner, "owner")
+    repo = _validate_github_slug(repo, "repository name")
 
     meta = await _get_json(app, f"repos/{owner}/{repo}")
-    issues = await _get_json(app, f"repos/{owner}/{repo}/issues?state=open&per_page=5")
+    issues_payload = await _get_json(app, f"repos/{owner}/{repo}/issues?state=open&per_page=5")
+    issues = issues_payload if isinstance(issues_payload, list) else []
 
     lines = [
         f"# {meta.get('full_name', f'{owner}/{repo}')}",
@@ -83,8 +88,8 @@ async def summarize_github_issue(
     if issue_number < 1:
         raise ValueError("issue_number must be positive")
 
-    owner = owner.strip()
-    repo = repo.strip()
+    owner = _validate_github_slug(owner, "owner")
+    repo = _validate_github_slug(repo, "repository name")
     issue = await _get_json(app, f"repos/{owner}/{repo}/issues/{issue_number}")
 
     labels = ", ".join(label.get("name", "") for label in issue.get("labels", [])) or "none"

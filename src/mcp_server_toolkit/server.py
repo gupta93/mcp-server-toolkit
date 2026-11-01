@@ -11,10 +11,11 @@ from mcp.server.mcpserver.context import Context
 
 from mcp_server_toolkit.config import Settings, get_settings
 from mcp_server_toolkit.context import AppContext
+from mcp_server_toolkit.database import resolve_sqlite_db_path
 from mcp_server_toolkit.logging_setup import configure_logging
 from mcp_server_toolkit.tools.github import summarize_github_issue, summarize_github_repository
 from mcp_server_toolkit.tools.openapi_http import call_openapi_operation
-from mcp_server_toolkit.tools.sql_query import resolve_demo_db_path, run_readonly_sql
+from mcp_server_toolkit.tools.sql_query import run_readonly_sql
 
 logger = structlog.get_logger(__name__)
 
@@ -29,9 +30,12 @@ def create_server(settings: Settings | None = None) -> MCPServer[AppContext]:
 
     @asynccontextmanager
     async def lifespan(_server: MCPServer[AppContext]) -> AsyncIterator[AppContext]:
-        demo_db_path = resolve_demo_db_path(settings.database_url)
+        if settings.database_url.startswith("sqlite:"):
+            demo_db_path = resolve_sqlite_db_path(settings)
+        else:
+            demo_db_path = settings.data_dir / "demo.db"
         timeout = httpx.Timeout(settings.http_timeout)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             app_ctx = AppContext(settings=settings, http=client, demo_db_path=demo_db_path)
             logger.info(
                 "server_starting",
@@ -77,10 +81,9 @@ def create_server(settings: Settings | None = None) -> MCPServer[AppContext]:
     async def run_readonly_sql_tool(
         query: str,
         ctx: Context[AppContext],
-        database_url: str | None = None,
     ) -> str:
         """Run a read-only SQL SELECT against the configured SQLite/Postgres database."""
-        return await run_readonly_sql(query, app=_app_context(ctx), database_url=database_url)
+        return await run_readonly_sql(query, app=_app_context(ctx))
 
     @server.tool(name="call_openapi_operation")
     async def call_openapi_operation_tool(
