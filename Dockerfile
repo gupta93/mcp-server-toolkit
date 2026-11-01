@@ -11,7 +11,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md LICENSE ./
-COPY demo_data ./demo_data
 COPY src ./src
 
 RUN pip install .
@@ -19,6 +18,9 @@ RUN pip install .
 EXPOSE 8000
 
 ENV MCP_TOOLKIT_HTTP_HOST=0.0.0.0 \
-    MCP_TOOLKIT_HTTP_PORT=8000
+    MCP_TOOLKIT_HTTP_PORT=8000 \
+    MCP_TOOLKIT_DATA_DIR=/data
+
+VOLUME ["/data"]
 
 CMD ["mcp-server-toolkit", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]

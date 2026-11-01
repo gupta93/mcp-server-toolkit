@@ -54,6 +54,7 @@ flowchart TB
 
 - Python 3.11+
 - Optional: `MCP_TOOLKIT_GITHUB_TOKEN` for higher GitHub rate limits (public repos work without it)
+- Required for networked OpenAPI calls: `MCP_TOOLKIT_OPENAPI_ALLOWED_HOSTS`
 
 ### Install
 
@@ -83,8 +84,10 @@ MCP endpoint: `http://127.0.0.1:8000/mcp` (override with `MCP_TOOLKIT_HTTP_PATH`
 
 ```bash
 docker build -t mcp-server-toolkit .
-docker run --rm -p 8000:8000 mcp-server-toolkit
+docker run --rm -p 8000:8000 -v mcp-data:/data mcp-server-toolkit
 ```
+
+The demo SQLite database is seeded once at startup into `MCP_TOOLKIT_DATA_DIR` (default `/data` in the container).
 
 ## Client configuration
 
@@ -97,7 +100,8 @@ docker run --rm -p 8000:8000 mcp-server-toolkit
       "command": "mcp-server-toolkit",
       "args": ["--transport", "stdio"],
       "env": {
-        "MCP_TOOLKIT_LOG_LEVEL": "INFO"
+        "MCP_TOOLKIT_LOG_LEVEL": "INFO",
+        "MCP_TOOLKIT_OPENAPI_ALLOWED_HOSTS": "httpbin.org"
       }
     }
   }
@@ -114,23 +118,48 @@ Point your MCP client at `http://127.0.0.1:8000/mcp` when the server is running 
 
 | Tool | Description |
 |------|-------------|
-| `summarize_github_repository` | Fetches repo metadata and lists recent open issues (`owner`, `repo`). |
+| `summarize_github_repository` | Fetches repo metadata and lists recent open issues (`owner`, `repo`). Slugs must match `[A-Za-z0-9._-]`. |
 | `summarize_github_issue` | Summarizes one issue (`owner`, `repo`, `issue_number`). |
-| `run_readonly_sql` | Runs a validated `SELECT`/`WITH` query. Optional `database_url` override. Demo DB is seeded from `demo_data/seed.sql`. |
-| `call_openapi_operation` | Loads an OpenAPI 3 spec (`spec_url` or `spec_text`) and calls an operation by `operationId`. Supports `path_params`, `query_params`, and `json_body`. |
+| `run_readonly_sql` | Runs a validated `SELECT`/`WITH` against the **configured** database only (no per-call URL override). |
+| `call_openapi_operation` | Loads an OpenAPI 3 spec (`spec_url` or `spec_text`) and calls an operation by `operationId`. Outbound HTTP requires an allowlist. |
+
+### Database configuration
+
+- **SQLite (default):** `MCP_TOOLKIT_DATABASE_URL=sqlite:///demo.db` seeds a demo database from packaged `seed.sql` into `MCP_TOOLKIT_DATA_DIR` on first startup. Queries open the file in SQLite **read-only** mode.
+- **Postgres (optional):** install `mcp-server-toolkit[postgres]` and set `MCP_TOOLKIT_DATABASE_URL=postgresql://…`. Queries run in a **READ ONLY** transaction with `statement_timeout`.
+- The SQL tool never accepts a caller-supplied connection string; change `MCP_TOOLKIT_DATABASE_URL` and restart the server instead.
 
 ### SQL safety
 
 - Single statement only
 - Must start with `SELECT` or `WITH`
 - Blocks write/DDL/admin keywords (`INSERT`, `DROP`, `PRAGMA`, …)
-- Appends `LIMIT` when missing (default `MCP_TOOLKIT_MAX_SQL_ROWS=100`)
+- Enforces row caps with `SELECT * FROM (<query>) AS _mcp_toolkit_limited LIMIT n` so trailing comments or nested `LIMIT` clauses cannot bypass the cap (`MCP_TOOLKIT_MAX_SQL_ROWS`, default 100)
+
+### OpenAPI outbound HTTP safety
+
+- `MCP_TOOLKIT_OPENAPI_ALLOWED_HOSTS` (comma-separated) must include every host used by the spec URL and the operation URL
+- Empty allowlist blocks all outbound OpenAPI HTTP until configured
+- `http`/`https` only; redirects disabled; resolved IPs must not be private, loopback, or link-local
+- Response bodies capped by `MCP_TOOLKIT_OPENAPI_MAX_RESPONSE_BYTES`; `Set-Cookie` headers are stripped from tool output
+
+### Self-contained `httpbinGet` example
+
+Set `MCP_TOOLKIT_OPENAPI_ALLOWED_HOSTS=httpbin.org`, then call `call_openapi_operation` with:
+
+```json
+{
+  "operation_id": "httpbinGet",
+  "spec_text": "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"Demo\",\"version\":\"1.0.0\"},\"servers\":[{\"url\":\"https://httpbin.org\"}],\"paths\":{\"/get\":{\"get\":{\"operationId\":\"httpbinGet\",\"responses\":{\"200\":{\"description\":\"OK\"}}}}}}",
+  "query_params": {"greeting": "hello"}
+}
+```
 
 ### Example prompts
 
 - "Summarize the GitHub repo `modelcontextprotocol/python-sdk`."
 - "Run read-only SQL: total order quantity by product name from the demo database."
-- "Using the demo OpenAPI fixture, call operation `httpbinGet` with greeting hello."
+- "Call OpenAPI operation `httpbinGet` against httpbin with `greeting=hello`."
 
 ## Development
 

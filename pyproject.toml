@@ -1,6 +1,12 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mcp_server_toolkit = ["data/*.sql"]
 
 [project]
 name = "mcp-server-toolkit"
@@ -29,9 +35,6 @@ dev = [
 
 [project.scripts]
 mcp-server-toolkit = "mcp_server_toolkit.cli:main"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/mcp_server_toolkit"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

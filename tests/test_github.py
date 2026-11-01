@@ -4,6 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import pytest_asyncio
 import respx
 
 from mcp_server_toolkit.config import Settings
@@ -11,11 +12,11 @@ from mcp_server_toolkit.context import AppContext
 from mcp_server_toolkit.tools.github import summarize_github_issue, summarize_github_repository
 
 
-@pytest.fixture
-def app() -> AppContext:
+@pytest_asyncio.fixture
+async def app() -> AppContext:
     settings = Settings(github_token=None)
-    client = httpx.AsyncClient()
-    return AppContext(settings=settings, http=client, demo_db_path=Path("/tmp/unused.db"))
+    async with httpx.AsyncClient() as client:
+        yield AppContext(settings=settings, http=client, demo_db_path=Path("/tmp/unused.db"))
 
 
 @respx.mock
@@ -71,3 +72,9 @@ async def test_summarize_github_issue(app: AppContext) -> None:
     text = await summarize_github_issue("octocat", "Hello-World", 42, app=app)
     assert "Issue #42" in text
     assert "Labels: bug" in text
+
+
+@pytest.mark.asyncio
+async def test_rejects_invalid_github_slug(app: AppContext) -> None:
+    with pytest.raises(ValueError, match="Invalid GitHub owner"):
+        await summarize_github_repository("bad actor", "Hello-World", app=app)

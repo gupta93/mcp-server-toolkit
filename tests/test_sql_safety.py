@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_server_toolkit.sql_safety import SqlSafetyError, ensure_row_limit, validate_readonly_select
+from mcp_server_toolkit.sql_safety import (
+    SqlSafetyError,
+    validate_readonly_select,
+    wrap_query_with_row_limit,
+)
 
 
 def test_validate_accepts_select() -> None:
@@ -29,10 +33,12 @@ def test_validate_rejects_unsafe_sql(sql: str) -> None:
         validate_readonly_select(sql)
 
 
-def test_ensure_row_limit_appends_limit() -> None:
-    assert ensure_row_limit("SELECT * FROM products", max_rows=10).endswith("LIMIT 10")
+def test_wrap_query_with_row_limit_uses_subquery() -> None:
+    wrapped = wrap_query_with_row_limit("SELECT * FROM products", max_rows=10)
+    assert wrapped.startswith("SELECT * FROM (")
+    assert wrapped.endswith("LIMIT 10")
 
 
-def test_ensure_row_limit_preserves_existing() -> None:
-    sql = "SELECT * FROM products LIMIT 5"
-    assert ensure_row_limit(sql, max_rows=10) == sql
+def test_wrap_query_defeats_trailing_line_comment() -> None:
+    wrapped = wrap_query_with_row_limit("SELECT 999 AS value -- ignore outer limit", max_rows=1)
+    assert wrapped.endswith("LIMIT 1")
