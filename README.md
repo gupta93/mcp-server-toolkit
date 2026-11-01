@@ -142,6 +142,7 @@ Point your MCP client at `http://127.0.0.1:8000/mcp` when the server is running 
 - Empty allowlist blocks all outbound OpenAPI HTTP until configured
 - `http`/`https` only; redirects disabled; resolved IPs must not be private, loopback, or link-local
 - Response bodies capped by `MCP_TOOLKIT_OPENAPI_MAX_RESPONSE_BYTES`; `Set-Cookie` headers are stripped from tool output
+- **DNS rebinding:** hostnames are resolved and checked immediately before each request. This does not eliminate every time-of-check/time-of-use race against a malicious DNS resolver that changes answers between validation and connect; treat the allowlist as a guardrail for demo use, not a complete SSRF boundary on its own.
 
 ### Self-contained `httpbinGet` example
 

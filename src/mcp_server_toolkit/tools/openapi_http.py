@@ -37,14 +37,18 @@ async def _fetch_spec(app: AppContext, spec_url: str) -> dict[str, Any]:
         max_bytes=app.settings.openapi_max_response_bytes,
     )
     response.raise_for_status()
-    content_type = response.headers.get("content-type", "")
+    max_bytes = app.settings.openapi_max_response_bytes
     body, _truncated = read_response_body(
-        response, max_bytes=app.settings.openapi_max_response_bytes
+        response.content,
+        max_bytes=max_bytes,
+        content_type=response.headers.get("content-type", ""),
+        encoding=response.encoding,
+        truncated=bool(response.extensions.get("mcp_truncated")),
     )
     if isinstance(body, dict):
         return body
     text = str(body)
-    if "json" in content_type or text.lstrip().startswith("{"):
+    if "json" in response.headers.get("content-type", "") or text.lstrip().startswith("{"):
         return json.loads(text)
     return yaml.safe_load(text)
 
@@ -126,7 +130,13 @@ async def call_openapi_operation(
         raise
 
     max_bytes = app.settings.openapi_max_response_bytes
-    body, truncated = read_response_body(response, max_bytes=max_bytes)
+    body, truncated = read_response_body(
+        response.content,
+        max_bytes=max_bytes,
+        content_type=response.headers.get("content-type", ""),
+        encoding=response.encoding,
+        truncated=bool(response.extensions.get("mcp_truncated")),
+    )
 
     result: dict[str, Any] = {
         "operation_id": operation_id,

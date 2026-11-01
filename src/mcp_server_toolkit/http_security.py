@@ -34,7 +34,7 @@ def _resolve_host_ips(hostname: str) -> Sequence[ipaddress.IPv4Address | ipaddre
     except socket.gaierror as exc:
         raise HttpSecurityError(f"Could not resolve host {hostname!r}") from exc
 
-    ips: list[ipaddress._BaseAddress] = []
+    ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for info in infos:
         sockaddr = info[4]
         if not sockaddr:
@@ -79,22 +79,44 @@ def public_response_headers(headers: httpx.Headers) -> dict[str, str]:
     return {key: value for key, value in headers.items() if key.lower() != "set-cookie"}
 
 
-def read_response_body(response: httpx.Response, *, max_bytes: int) -> tuple[str | dict, bool]:
-    raw = response.content
-    truncated = len(raw) > max_bytes
-    if truncated:
+async def _read_capped_response_body(
+    response: httpx.Response, *, max_bytes: int
+) -> tuple[bytes, bool]:
+    data = bytearray()
+    truncated = False
+    async for chunk in response.aiter_bytes():
+        if len(data) >= max_bytes:
+            truncated = True
+            break
+        take = chunk[: max_bytes - len(data)]
+        data.extend(take)
+        if len(take) < len(chunk):
+            truncated = True
+            break
+    return bytes(data), truncated
+
+
+def read_response_body(
+    raw: bytes,
+    *,
+    max_bytes: int,
+    content_type: str,
+    encoding: str | None,
+    truncated: bool = False,
+) -> tuple[str | dict, bool]:
+    if len(raw) > max_bytes:
+        truncated = True
         raw = raw[:max_bytes]
 
-    content_type = response.headers.get("content-type", "")
     if "json" in content_type:
         import json
 
         try:
-            return json.loads(raw.decode(response.encoding or "utf-8")), truncated
+            return json.loads(raw.decode(encoding or "utf-8")), truncated
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass
 
-    text = raw.decode(response.encoding or "utf-8", errors="replace")
+    text = raw.decode(encoding or "utf-8", errors="replace")
     if truncated:
         text += "\n… _(truncated)_"
     return text, truncated
@@ -110,9 +132,15 @@ async def safe_http_request(
     **kwargs: object,
 ) -> httpx.Response:
     validate_outbound_http_url(url, allowed_hosts=allowed_hosts)
-    response = await client.request(method, url, follow_redirects=False, **kwargs)
-    if response.status_code in {301, 302, 303, 307, 308}:
-        raise HttpSecurityError("Redirects are not allowed for OpenAPI outbound requests")
-    # Touch content so callers can slice safely; size cap applied when serializing.
-    _ = response.content[: max_bytes + 1]
-    return response
+    async with client.stream(method, url, follow_redirects=False, **kwargs) as response:
+        if response.status_code in {301, 302, 303, 307, 308}:
+            await response.aclose()
+            raise HttpSecurityError("Redirects are not allowed for OpenAPI outbound requests")
+        body, truncated = await _read_capped_response_body(response, max_bytes=max_bytes)
+        return httpx.Response(
+            status_code=response.status_code,
+            headers=response.headers,
+            content=body,
+            request=response.request,
+            extensions={"mcp_truncated": truncated},
+        )
