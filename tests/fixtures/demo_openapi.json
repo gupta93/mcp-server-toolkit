@@ -1,0 +1,21 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Demo API", "version": "1.0.0" },
+  "servers": [{ "url": "https://httpbin.org" }],
+  "paths": {
+    "/get": {
+      "get": {
+        "operationId": "httpbinGet",
+        "summary": "Echo GET request",
+        "parameters": [
+          {
+            "name": "greeting",
+            "in": "query",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}
